@@ -1,0 +1,10 @@
+.runtime/
+out/
+target/
+data/
+backups/
+.env
+.env.*
+!.env.example
+.DS_Store
+booking-*.png
