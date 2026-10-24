@@ -6,7 +6,7 @@
 
 Создайте бесплатный проект. Для приложения используйте отдельную схему `forma`, которая не включена в Exposed schemas Data API. Не размещайте таблицы клиентов в открытой схеме `public`.
 
-Миграция закрытой схемы без учётных данных находится в `deploy/supabase/001_private_schema.sql`. RLS на этих таблицах пока выключен: доступ ограничен правами схемы и таблиц, а принадлежность компаний проверяет Java. Не выдавайте `anon` и `authenticated` права на эту схему.
+Миграция закрытой схемы без учётных данных находится в `deploy/supabase/001_private_schema.sql`. В подключённом проекте RLS включён на всех пяти таблицах: политика `backend_only` разрешает доступ только серверной роли `forma_app`. Принадлежность компаний дополнительно проверяет Java. Публичным ролям `anon` и `authenticated` права на схему не выдаются.
 
 Для нового размещения в SQL Editor создайте отдельного пользователя и схему (пароль придумайте самостоятельно и не сохраняйте в Git):
 
@@ -24,7 +24,7 @@ DATABASE_USER=forma_app.PROJECT_REF
 DATABASE_PASSWORD=<password above>
 ```
 
-Имена host/project reference берите из своего проекта. Для первого старта пользователь владеет схемой и может создать таблицы. Приложение не использует Supabase anon/service-role API keys, браузер не получает пароль БД. Не добавляйте `forma` в API exposed schemas. Политики владельцев компаний проверяет Java-сервер. Для настоящего production стоит отделить миграционного пользователя от runtime-роли и добавить RLS как дополнительную защиту.
+Имена host/project reference берите из своего проекта. Для ручного первого размещения создайте таблицы из миграции заранее. В уже подключённом проекте FORMA серверная роль получает только USAGE на схему и SELECT/INSERT/UPDATE/DELETE на таблицы, без владения схемой и без DDL-прав. Приложение не использует Supabase anon/service-role API keys, браузер не получает пароль БД. Не добавляйте `forma` в API exposed schemas. Политики владельцев компаний проверяет Java-сервер. Для настоящего production стоит отделить миграционного пользователя от runtime-роли и добавить RLS как дополнительную защиту.
 
 Документация: [подключения Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres), [pooler](https://supabase.com/docs/guides/troubleshooting/supavisor-and-connection-terminology-explained-9pr_ZO).
 
@@ -42,7 +42,7 @@ GOOGLE_CLIENT_ID=<from step 3>
 GOOGLE_CLIENT_SECRET=<from step 3>
 ```
 
-`BASE_URL` — без завершающего слеша. PORT задаёт Render. Health check: `/api/companies`. База H2 годится только локально: на Render файловая система временная. Production-профиль требует внешнюю БД.
+`BASE_URL` — без завершающего слеша. На Render её можно не задавать: приложение использует `RENDER_EXTERNAL_URL`. PORT задаёт Render. Health check: `/api/companies`. База H2 годится только локально: на Render файловая система временная. Production-профиль требует внешнюю БД; таблицы должны быть созданы заранее, SQL-инициализация сервером в production отключена.
 
 Если Google пока не настроен, оставьте обе переменные GOOGLE пустыми: каталог, запись и read-only демокабинет работают; вход честно обозначен как недоступный.
 

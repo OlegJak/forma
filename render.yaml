@@ -3,19 +3,14 @@ services:
     name: forma-booking
     runtime: docker
     plan: free
+    region: frankfurt
     healthCheckPath: /api/companies
     envVars:
       - key: SPRING_PROFILES_ACTIVE
         value: prod
-      - key: BASE_URL
-        sync: false
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_USER
         sync: false
       - key: DATABASE_PASSWORD
-        sync: false
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
         sync: false
