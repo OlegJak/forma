@@ -1,6 +1,6 @@
 # FORMA
 
-[Открыть платформу](https://forma.yakimush-oleg.workers.dev) · [Демокабинет](https://forma.yakimush-oleg.workers.dev/demo)
+[Открыть платформу](https://forma.forma-booking.workers.dev) · [Демокабинет](https://forma.forma-booking.workers.dev/demo)
 
 Платформа онлайн-записи для небольших компаний, у которых нет собственного сервиса бронирования. Концепт для портфолио: публичный каталог, отдельные страницы компаний, Google-вход и кабинет владельца.
 
