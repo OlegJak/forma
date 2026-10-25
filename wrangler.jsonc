@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "forma",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/oauth2/*", "/login/oauth2/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "forma",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Daily cleanup of expired sessions and booking rate-limit windows.
+  "triggers": { "crons": ["17 3 * * *"] }
+}
