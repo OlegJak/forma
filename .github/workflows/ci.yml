@@ -1,4 +1,4 @@
-name: Java checks
+name: Checks
 on: [push, pull_request]
 jobs:
   test:
@@ -7,9 +7,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-node@v4
         with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - run: mvn --batch-mode verify
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

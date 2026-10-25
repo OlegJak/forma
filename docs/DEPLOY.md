@@ -1,87 +1,95 @@
-# Публикация FORMA: Render + Supabase + Google
+# Публикация FORMA: Cloudflare Workers + D1 + Google
 
-Схема: браузер → Java/Spring Boot на Render → PostgreSQL в Supabase. Вход — Google OpenID Connect через Spring Security. Supabase Auth в этой архитектуре не нужен.
+Схема: браузер → Cloudflare Worker (API и вход через Google) → база Cloudflare D1. HTML, CSS, JS и шрифты Cloudflare раздаёт как статику со своей сети. Сервер не засыпает: Worker запускается за миллисекунды на каждый запрос, поэтому первой загрузки «после простоя» нет.
 
-## 1. Supabase
+Бесплатного тарифа Workers хватает для портфолио: 100 000 запросов в день, D1 — 5 ГБ и 5 млн чтений строк в день. Актуальные лимиты: [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [D1](https://developers.cloudflare.com/d1/platform/pricing/).
 
-Создайте бесплатный проект. Для приложения используйте отдельную схему `forma`, которая не включена в Exposed schemas Data API. Не размещайте таблицы клиентов в открытой схеме `public`.
+## 1. Аккаунт и база
 
-Миграция закрытой схемы без учётных данных находится в `deploy/supabase/001_private_schema.sql`. В подключённом проекте RLS включён на всех пяти таблицах: политика `backend_only` разрешает доступ только серверной роли `forma_app`. Принадлежность компаний дополнительно проверяет Java. Публичным ролям `anon` и `authenticated` права на схему не выдаются.
+Нужны Node.js 22+ и бесплатный аккаунт Cloudflare.
 
-Для нового размещения в SQL Editor создайте отдельного пользователя и схему (пароль придумайте самостоятельно и не сохраняйте в Git):
-
-```sql
-CREATE ROLE forma_app LOGIN PASSWORD 'REPLACE_WITH_A_STRONG_UNIQUE_PASSWORD';
-CREATE SCHEMA forma AUTHORIZATION forma_app;
-GRANT USAGE ON SCHEMA forma TO forma_app;
+```sh
+npm install
+npx wrangler login
+npx wrangler d1 create forma
 ```
 
-В Connect → Session pooler скопируйте host и port 5432. Подключение:
+Команда `d1 create` выведет `database_id`. Разрешите wrangler дописать его в `wrangler.jsonc` или вставьте вручную в блок `d1_databases`. Затем создайте таблицы и демокомпании:
+
+```sh
+npm run db:migrate
+```
+
+Миграции лежат в `migrations/`. Новая схема — новый файл `0003_...sql`, старые файлы не меняются.
+
+## 2. Публикация
+
+```sh
+npm run deploy
+```
+
+Wrangler напечатает адрес вида `https://forma.<ваш-поддомен>.workers.dev`. Каталог, запись и демокабинет работают сразу.
+
+Автопубликация из GitHub: Cloudflare Dashboard → Workers & Pages → forma → Settings → Build → подключите репозиторий. Build command — `npm ci`, Deploy command — `npx wrangler d1 migrations apply forma --remote && npx wrangler deploy`.
+
+Свой домен: Worker → Settings → Domains & Routes → Add custom domain.
+
+## 3. Вход через Google
+
+В Google Cloud / Google Auth Platform создайте OAuth client типа Web application (Branding: имя FORMA и email поддержки; Audience: External). Разрешённые redirect URI:
 
 ```text
-DATABASE_URL=jdbc:postgresql://POOLER_HOST:5432/postgres?sslmode=require&currentSchema=forma
-DATABASE_USER=forma_app.PROJECT_REF
-DATABASE_PASSWORD=<password above>
+http://localhost:8787/login/oauth2/code/google
+https://forma.<ваш-поддомен>.workers.dev/login/oauth2/code/google
 ```
 
-Имена host/project reference берите из своего проекта. Для ручного первого размещения создайте таблицы из миграции заранее. В уже подключённом проекте FORMA серверная роль получает только USAGE на схему и SELECT/INSERT/UPDATE/DELETE на таблицы, без владения схемой и без DDL-прав. Приложение не использует Supabase anon/service-role API keys, браузер не получает пароль БД. Не добавляйте `forma` в API exposed schemas. Политики владельцев компаний проверяет Java-сервер. Для настоящего production стоит отделить миграционного пользователя от runtime-роли и добавить RLS как дополнительную защиту.
+Ключи храните только в секретах Cloudflare:
 
-Документация: [подключения Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres), [pooler](https://supabase.com/docs/guides/troubleshooting/supavisor-and-connection-terminology-explained-9pr_ZO).
-
-## 2. Render
-
-Подключите GitHub-репозиторий и создайте Web Service → Docker → Free, либо Blueprint из `render.yaml`. Это существующие конфигурации проекта, frontend собирается вместе с сервером. Заполняйте секреты только в Render Environment.
-
-```text
-SPRING_PROFILES_ACTIVE=prod
-BASE_URL=https://YOUR-SERVICE.onrender.com
-DATABASE_URL=<JDBC URL from step 1>
-DATABASE_USER=<user from step 1>
-DATABASE_PASSWORD=<password from step 1>
-GOOGLE_CLIENT_ID=<from step 3>
-GOOGLE_CLIENT_SECRET=<from step 3>
+```sh
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
 ```
 
-`BASE_URL` — без завершающего слеша. На Render её можно не задавать: приложение использует `RENDER_EXTERNAL_URL`. PORT задаёт Render. Health check: `/api/companies`. База H2 годится только локально: на Render файловая система временная. Production-профиль требует внешнюю БД; таблицы должны быть созданы заранее, SQL-инициализация сервером в production отключена.
+`BASE_URL` задавать не нужно: адрес берётся из запроса. Задайте его (`npx wrangler secret put BASE_URL`, без слеша в конце), только если сайт открывается по нескольким доменам, а в Google зарегистрирован один.
 
-Если Google пока не настроен, оставьте обе переменные GOOGLE пустыми: каталог, запись и read-only демокабинет работают; вход честно обозначен как недоступный.
+Запрашиваются только `openid profile email`. Пока приложение в режиме Testing, добавьте свои аккаунты в Test users.
 
-Бесплатный Render останавливает неактивные web services после 15 минут; первый запрос после простоя может быть медленным. Проверьте актуальные квоты перед публикацией: [Render Free](https://render.com/docs/free).
+## 4. Локальный запуск
 
-## 3. Google OAuth
-
-В Google Cloud / Google Auth Platform создайте проект, настройте Branding (имя FORMA, email поддержки), Audience (External), и OAuth client типа Web application. Настройку согласия и Terms при создании аккаунтов выполняет владелец.
-
-Разрешённые redirect URI:
-
-```text
-http://localhost:8080/login/oauth2/code/google
-https://YOUR-SERVICE.onrender.com/login/oauth2/code/google
+```sh
+npm install
+npm run dev        # http://localhost:8787, локальная копия D1 в .wrangler/
+npm test           # тесты API в настоящем рантайме Workers
+npm run typecheck
 ```
 
-Ключи Client ID и Client secret перенесите в серверные environment variables. Не публикуйте Client secret и не вставляйте его в JS. Запрашиваются только `openid profile email`; доступ к Gmail/контактам/календарю не нужен. Пока приложение в Google Testing, добавьте свои аккаунты в Test users; для общего доступа настройте аудиторию/публикацию в соответствии с требованиями Google.
+Для проверки Google-входа локально скопируйте `.dev.vars.example` в `.dev.vars` и заполните ключи.
 
-[Официальный Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect), [Spring Security OAuth2](https://spring.io/guides/tutorials/spring-boot-oauth2/).
-
-## 4. Проверка после деплоя
+## 5. Проверка после деплоя
 
 1. Откройте публичный адрес и демокабинет `/demo`.
-2. Войдите через Google и создайте компанию `/dashboard`.
-3. Добавьте хотя бы одну услугу и специалиста; настройте часы и дни работы.
-4. Откройте `/studio/<slug>` в отдельном браузере, создайте тестовую запись и проверьте её в кабинете владельца.
-5. Два запроса на пересекающееся время одного специалиста: только один должен пройти.
-6. Аккаунт другой компании не должен иметь доступ к вашим бронированиям.
-7. Перезапустите сервис: запись должна остаться в Supabase. Перелогин после рестарта ожидаем: HTTP-сессии хранятся в памяти одного сервера.
+2. Войдите через Google и создайте компанию в `/dashboard`.
+3. Добавьте услугу и специалиста, настройте часы и дни работы.
+4. Откройте `/studio/<slug>` в другом браузере, запишитесь и найдите запись в кабинете владельца.
+5. Два запроса на пересекающееся время одного специалиста: проходит только один.
+6. Аккаунт другой компании не видит ваши записи.
+
+## Как устроена защита
+
+- Сессия — случайный токен в HttpOnly-cookie; в D1 хранится только его SHA-256. Срок — 7 дней, «Выйти» удаляет сессию на сервере.
+- CSRF: токен из `/api/session` сверяется с cookie для всех POST/PUT/DELETE, запросы с чужим `Origin` отклоняются.
+- Google OIDC: `state` и `nonce` в короткой cookie, проверка `iss`, `aud`, `exp` и `nonce` у ID-токена.
+- Двойная запись невозможна: проверка пересечения, активности мастера и услуги и часов работы выполняется в той же SQL-команде, что и вставка, а D1 выполняет её атомарно.
+- Лимит: 30 попыток записи за 10 минут с одного IP (`CF-Connecting-IP`), счётчики в D1.
+- Заголовки CSP, `X-Frame-Options`, `Referrer-Policy` для статики (`public/_headers`) и API.
+- Раз в сутки cron удаляет истёкшие сессии и старые счётчики лимита.
 
 ## Ограничения концепта
 
 - Это рабочий прототип для портфолио, не production-сервис для реальных клиентов.
-- Нет SMS/email, платежей, синхронизации с внешним календарём, отдельных смен/перерывов и привязки отдельных услуг к отдельным мастерам. Каждый активный специалист компании доступен для каждой её услуги.
+- Нет SMS/email, платежей, синхронизации с внешним календарём, смен/перерывов и привязки услуг к отдельным мастерам. Каждый активный специалист компании доступен для каждой её услуги.
 - Часовой пояс всех компаний — Europe/Tallinn; длительности и слоты кратны 30 минутам, горизонт записи 60 дней.
 - Смена рабочих часов влияет на новые слоты; ранее созданные записи остаются в расписании.
 - Удаление услуги/специалиста — архивирование, история записей сохраняется.
-- Отмену выполняет владелец компании. Клиент видит свои записи, только если входил при бронировании; гостевые записи автоматически не присваиваются аккаунту.
-- Базовый лимит: 30 попыток записи / 10 минут на адрес соединения; за общим прокси лимит может быть общим для пользователей. Для настоящего трафика нужен лимитер на доверенном edge/proxy и защита от спама.
-- Предусмотрена одна реплика Java; сессии в памяти, ограничения запросов локальны процессу. Для масштабирования нужны общие сессии и распределённые ограничения.
-- Нет самостоятельного удаления аккаунта, согласованных сроков хранения, контактов оператора и процесса обработки запросов на удаление. До настоящего запуска это нужно определить и отразить в privacy policy.
-- Тесты проверяют Google redirect/state/nonce и отказ поддельному callback. Полный Google login требует реальных ключей и ручной проверки на опубликованном домене.
+- Отмену выполняет владелец компании. Клиент видит свои записи, только если входил при бронировании.
+- Нет самостоятельного удаления аккаунта, согласованных сроков хранения и процесса обработки запросов на удаление. До настоящего запуска это нужно определить и отразить в privacy policy.
